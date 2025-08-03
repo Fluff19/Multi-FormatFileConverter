@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Free Multi-Format File Converter</title>
+
+<!-- Libraries -->
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib/dist/pdf-lib.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.9.0/dist/pptxgen.bundle.js"></script>
+<script src="https://unpkg.com/heic2any/dist/heic2any.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.7/dist/ffmpeg.min.js"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/docx@7.3.0/build/index.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/fast-xml-parser@4.2.4/dist/fast-xml-parser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/opentype.js@1.3.4/dist/opentype.min.js"></script>
+
+<style>
+  body { font-family: Arial, sans-serif; margin: 2rem; }
+  #log { white-space: pre-wrap; background: #eee; padding: 1rem; height: 250px; overflow: auto; margin-top: 1rem;}
+</style>
+</head>
+<body>
+
+<h1>Multi-Format File Converter with Extended Media & Font Support</h1>
+
+<input type="file" id="fileInput" multiple><br><br>
+
+<label for="format">Convert to / Handle as:</label>
+<select id="format">
+  <optgroup label="Images">
+    <option value="image/png">PNG</option>
+    <option value="image/jpeg">JPEG</option>
+    <option value="image/webp">WebP</option>
+    <option value="image/tiff">TIFF (no conversion)</option>
+    <option value="image/bmp">BMP (no conversion)</option>
+    <option value="image/gif">GIF (no conversion)</option>
+    <option value="image/svg+xml">SVG (render & convert)</option>
+    <option value="image/vnd.microsoft.icon">ICO (no conversion)</option>
+  </optgroup>
+  <optgroup label="Documents">
+    <option value="pdf">PDF (read & save)</option>
+    <option value="pptx">PPTX (create example)</option>
+    <option value="docx">DOCX (create example)</option>
+    <option value="xlsx">XLSX (create example)</option>
+    <option value="txt">TXT (text file)</option>
+    <option value="json">JSON (parse & pretty save)</option>
+    <option value="csv">CSV (parse & save)</option>
+    <option value="xml">XML (parse & save)</option>
+    <option value="md">Markdown (.md)</option>
+  </optgroup>
+  <optgroup label="Fonts">
+    <option value="fontinfo">Font Info (TTF, OTF, WOFF, WOFF2)</option>
+    <option disabled>Note: EOT, SVG fonts not supported for parsing</option>
+  </optgroup>
+  <optgroup label="Audio/Video">
+    <option value="mp3">MP3</option>
+    <option value="wav">WAV</option>
+    <option value="mp4">MP4</option>
+    <option value="webm">WebM</option>
+    <option value="avi">AVI</option>
+    <option value="mov">MOV</option>
+    <option value="mkv">MKV</option>
+    <option value="flv">FLV</option>
+    <option value="mpeg">MPEG</option>
+    <option value="aac">AAC</option>
+    <option value="ogg">OGG</option>
+    <option value="flac">FLAC</option>
+    <option value="wma">WMA</option>
+  </optgroup>
+</select>
+
+<button onclick="convertFiles()">Convert & Download</button>
+
+<div id="log"></div>
+
+<script>
+  const logEl = document.getElementById('log');
+  const log = (msg) => {
+    logEl.textContent += msg + '\\n';
+    logEl.scrollTop = logEl.scrollHeight;
+  };
+
+  async function convertFiles() {
+    const files = document.getElementById('fileInput').files;
+    const targetFormat = document.getElementById('format').value;
+
+    if (files.length === 0) {
+      alert('Please select files');
+      return;
+    }
+
+    const allMediaFormats = ['mp3','wav','mp4','webm','avi','mov','mkv','flv','mpeg','aac','ogg','flac','wma'];
+
+    let ffmpeg;
+    if (allMediaFormats.includes(targetFormat)) {
+      log('Loading ffmpeg.wasm, please wait...');
+      ffmpeg = FFmpeg.createFFmpeg({ log: true });
+      await ffmpeg.load();
+      log('ffmpeg loaded');
+    }
+
+    for (const file of files) {
+      log(`Processing ${file.name}...`);
+      try {
+        if ((file.type === "image/heic" || file.type === "image/heif") && ['image/png', 'image/jpeg', 'image/webp'].includes(targetFormat)) {
+          await convertHeic(file, targetFormat);
+        } else if (file.type.startsWith("image/") && targetFormat.startsWith("image/")) {
+          await convertImage(file, targetFormat);
+        } else if (file.type === "application/pdf" && targetFormat === 'pdf') {
+          await processPdf(file);
+        } else if (targetFormat === 'pptx') {
+          createSamplePptx();
+          break;
+        } else if (targetFormat === 'docx') {
+          createSampleDocx();
+          break;
+        } else if (targetFormat === 'xlsx') {
+          createSampleXlsx();
+          break;
+        } else if (targetFormat === 'txt') {
+          await processTxt(file);
+        } else if (targetFormat === 'json') {
+          await processJson(file);
+        } else if (targetFormat === 'csv') {
+          await processCsv(file);
+        } else if (targetFormat === 'xml') {
+          await processXml(file);
+        } else if (targetFormat === 'md') {
+          await processMd(file);
+        } else if (targetFormat === 'fontinfo') {
+          await processFont(file);
+        } else if (allMediaFormats.includes(targetFormat)) {
+          await convertMedia(file, targetFormat, ffmpeg);
+        } else {
+          log(`Skipping unsupported file or conversion: ${file.name}`);
+        }
+      } catch (e) {
+        log(`Error processing ${file.name}: ${e.message}`);
+      }
+    }
+  }
+
+  function downloadBlob(blob, filename) {
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    link.click();
+  }
+
+  async function convertImage(file, format) {
+    const ext = format.split('/')[1];
+    const reader = new FileReader();
+
+    if (file.type === 'image/svg+xml') {
+      return new Promise((resolve, reject) => {
+        reader.onload = e => {
+          const svgText = e.target.result;
+          const svgBlob = new Blob([svgText], {type: 'image/svg+xml'});
+          const url = URL.createObjectURL(svgBlob);
+
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width || 500;
+            canvas.height = img.height || 500;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+
+            canvas.toBlob(blob => {
+              if (!blob) {
+                reject(new Error('Conversion failed'));
+                return;
+              }
+              downloadBlob(blob, file.name.replace(/\.\w+$/, '.' + ext));
+              log(`Converted SVG ${file.name} to ${format}`);
+              URL.revokeObjectURL(url);
+              resolve();
+            }, format);
+          };
+          img.onerror = () => reject(new Error('SVG image load failed'));
+          img.src = url;
+        };
+        reader.readAsText(file);
+      });
+    }
+
+    if (['image/bmp', 'image/x-ms-bmp', 'image/vnd.microsoft.icon', 'image/x-icon'].includes(file.type)) {
+      const data = await file.arrayBuffer();
+      downloadBlob(new Blob([data], {type: file.type}), file.name);
+      log(`Re-downloaded BMP/ICO without conversion: ${file.name}`);
+      return;
+    }
+
+    if (file.type === 'image/gif') {
+      const data = await file.arrayBuffer();
+      downloadBlob(new Blob([data], {type: 'image/gif'}), file.name);
+      log(`Re-downloaded GIF without conversion (animated GIFs not supported): ${file.name}`);
+      return;
+    }
+
+    return new Promise((resolve, reject) => {
+      reader.onload = e => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.width;
+          canvas.height = img.height;
+          canvas.getContext('2d').drawImage(img, 0, 0);
+
+          canvas.toBlob(blob => {
+            if (!blob) {
+              reject(new Error('Conversion failed'));
+              return;
+            }
+            downloadBlob(blob, file.name.replace(/\.\w+$/, '.' + ext));
+            log(`Converted image ${file.name} to ${format}`);
+            resolve();
+          }, format);
+        };
+        img.onerror = () => reject(new Error('Image load failed'));
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function convertHeic(file, format) {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const blob = await heic2any({ blob: new Blob([arrayBuffer]), toType: format });
+      downloadBlob(blob, file.name.replace(/\.(heic|heif)$/i, '.' + format.split('/')[1]));
+      log(`Converted HEIC ${file.name} to ${format}`);
+    } catch (e) {
+      log(`HEIC conversion failed for ${file.name}: ${e.message}`);
+    }
+  }
+
+  function createSamplePptx() {
+    const pptx = new PptxGenJS();
+    const slide = pptx.addSlide();
+    slide.addText('Hello from PptxGenJS!', { x:1, y:1, fontSize:24, color:'363636' });
+    pptx.writeFile('Sample.pptx');
+    log('Created sample PPTX file');
+  }
+
+  function createSampleDocx() {
+    const { Document, Packer, Paragraph, TextRun } = docx;
+    const doc = new Document({
+      sections: [{
+        children: [
+          new Paragraph({
+            children: [
+              new TextRun("Hello from docx.js!"),
+              new TextRun({
+                text: " Bold text.",
+                bold: true,
+              }),
+            ],
+          }),
+        ],
+      }],
+    });
+
+    Packer.toBlob(doc).then(blob => {
+      downloadBlob(blob, 'Sample.docx');
+      log('Created sample DOCX file');
+    });
+  }
+
+  function createSampleXlsx() {
+    const wb = XLSX.utils.book_new();
+    const ws_data = [
+      ["Name", "Age", "City"],
+      ["Alice", 25, "London"],
+      ["Bob", 30, "New York"]
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(ws_data);
+    XLSX.utils.book_append_sheet(wb, ws, "Sheet1");
+    const wbout = XLSX.write(wb, {bookType:'xlsx', type:'array'});
+    const blob = new Blob([wbout], {type:"application/octet-stream"});
+    downloadBlob(blob, "Sample.xlsx");
+    log('Created sample XLSX file');
+  }
+
+  async function processTxt(file) {
+    const text = await file.text();
+    log(`TXT content of ${file.name}:\n${text.substring(0, 200)}...`);
+    downloadBlob(new Blob([text], {type: "text/plain"}), file.name);
+  }
+
+  async function processJson(file) {
+    const text = await file.text();
+    try {
+      const obj = JSON.parse(text);
+      const pretty = JSON.stringify(obj, null, 2);
+      downloadBlob(new Blob([pretty], {type: "application/json"}), file.name);
+      log(`Parsed & pretty saved JSON file: ${file.name}`);
+    } catch(e) {
+      log(`JSON parse error in ${file.name}: ${e.message}`);
+    }
+  }
+
+  async function processCsv(file) {
+    const text = await file.text();
+    const wb = XLSX.read(text, {type:"string"});
+    const wbout = XLSX.write(wb, {bookType:"csv", type:"array"});
+    const blob = new Blob([wbout], {type:"text/csv"});
+    downloadBlob(blob, file.name);
+    log(`Processed CSV file: ${file.name}`);
+  }
+
+  async function processXml(file) {
+    const text = await file.text();
+    try {
+      const jObj = window.fastXmlParser.parse(text);
+      const builder = new window.fastXmlParser.j2xParser();
+      const xmlOut = builder.parse(jObj);
+      downloadBlob(new Blob([xmlOut], {type:"application/xml"}), file.name);
+      log(`Parsed & saved XML file: ${file.name}`);
+    } catch(e) {
+      log(`XML parse error in ${file.name}: ${e.message}`);
+    }
+  }
+
+  async function processMd(file) {
+    const text = await file.text();
+    downloadBlob(new Blob([text], {type:"text/markdown"}), file.name);
+    log(`Processed Markdown file: ${file.name}`);
+  }
+
+  async function processFont(file) {
+    const extension = file.name.split('.').pop().toLowerCase();
+    const supportedParseFormats = ['ttf', 'otf', 'woff', 'woff2'];
+
+    if (!supportedParseFormats.includes(extension)) {
+      log(`Font format .${extension} not supported for detailed parsing: ${file.name}`);
+      alert(`Sorry, .${extension} font parsing not supported in this demo.`);
+      return;
+    }
+
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+
+      // opentype.js might fail on WOFF/WOFF2 sometimes, but try anyway
+      const font = opentype.parse(arrayBuffer);
+
+      log(`Font ${file.name} loaded: family = ${font.names.fontFamily?.en || 'N/A'}, style = ${font.names.fontSubfamily?.en || 'N/A'}`);
+
+      alert(`Font info:\nFamily: ${font.names.fontFamily?.en || 'N/A'}\nStyle: ${font.names.fontSubfamily?.en || 'N/A'}`);
+    } catch (e) {
+      log(`Font parsing failed for ${file.name}: ${e.message}`);
+      alert(`Failed to parse font ${file.name}: ${e.message}`);
+    }
+  }
+
+  async function processPdf(file) {
+    try {
+      const data = await file.arrayBuffer();
+      const pdfDoc = await PDFLib.PDFDocument.load(data);
+      const pdfBytes = await pdfDoc.save();
+      const blob = new Blob([pdfBytes], {type: 'application/pdf'});
+      downloadBlob(blob, file.name);
+      log(`Processed PDF ${file.name}`);
+    } catch(e) {
+      log(`PDF processing failed: ${e.message}`);
+    }
+  }
+
+  async function convertMedia(file, format, ffmpeg) {
+    if (!ffmpeg) {
+      log('ffmpeg not loaded');
+      return;
+    }
+    const data = await file.arrayBuffer();
+    ffmpeg.FS('writeFile', file.name, new Uint8Array(data));
+    const outName = `output.${format}`;
+
+    await ffmpeg.run('-i', file.name, outName);
+
+    const output = ffmpeg.FS('readFile', outName);
+    const blob = new Blob([output.buffer], {type: file.type});
+    downloadBlob(blob, outName);
+    log(`Converted media ${file.name} to ${format}`);
+
+    ffmpeg.FS('unlink', file.name);
+    ffmpeg.FS('unlink', outName);
+  }
+</script>
+
+</body>
+</html>
